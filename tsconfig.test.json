@@ -1,0 +1,12 @@
+{
+    "extends": "./tsconfig.lib.json",
+    "include": ["tests"],
+
+    "compilerOptions": {
+        // Modules
+        "paths": {
+            "apng-fest": ["./src"],
+            "apng-fest/*": ["./src/*"]
+        },
+    }
+}
