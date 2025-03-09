@@ -1,3 +1,3 @@
 # apng-fest
 
-A simple .APNG parser and encoder in the browser.
+A simple yet powerful .APNG encoder and decoder in the browser.
