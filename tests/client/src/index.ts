@@ -4,7 +4,7 @@ import "./style.css";
 const canvas = document.querySelector<HTMLCanvasElement>("#preview")!;
 const ctx = canvas.getContext("2d")!;
 
-const test = await APNG.fromURL("test-2.png");
+const test = await APNG.fromURL("test-3.png");
 await test.createFrames();
 
 const { width, height } = test;

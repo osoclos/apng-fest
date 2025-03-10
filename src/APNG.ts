@@ -165,29 +165,24 @@ export class APNG {
         const ancillaryChunkBuffer = new Uint8Array(this.ancillaryChunks.flatMap((chunk) => [...reformChunk(chunk)]));
 
         const [fcTLs, fdATs] = (<ChunkType[]>["fcTL", "fdAT"]).map((type) => this.filterChunks(type));
-
-        const first_fcTL_Idx = fcTLs.findIndex((chunk) => getSequenceNumber(chunk) === 0);
-        if (first_fcTL_Idx < 0) throw new Error("Unable to find starting fcTL chunk. File may be corrupted or tampered with.");
-
-        const [first_fcTL] = fcTLs.splice(first_fcTL_Idx, 1);
+        fdATs.unshift(IDAT);
 
         const animationChunks: Chunk[] = [];
         const numOfFrames = acTL.view.getUint32(0);
 
-        for (let i: number = 1; i < numOfFrames * 2 -1 ; i += 2) {
+        for (let i: number = 0; i < numOfFrames * 2 - 1; i++) {
             const fcTL_Idx = fcTLs.findIndex((chunk) => getSequenceNumber(chunk) === i);
             if (fcTL_Idx < 0) throw new Error("Unable to find following fcTL chunk. File may be corrupted or tampered with.");
 
-            const fdAT_Idx = fdATs.findIndex((chunk) => getSequenceNumber(chunk) === i + 1);
+            const fdAT_Idx = fdATs.findIndex((chunk) => (chunk.type === "IDAT" && this.chunks.indexOf(IDAT) > this.chunks.findIndex(({ type }) => type === "fcTL")) || getSequenceNumber(chunk) === i + 1);
             if (fdAT_Idx < 0) throw new Error("Unable to find following fdAT chunk. File may be corrupted or tampered with.");
 
             const [fcTL] = fcTLs.splice(fcTL_Idx, 1);
             const [fdAT] = fdATs.splice(fdAT_Idx, 1);
 
+            if (fdAT.type !== "IDAT") i++;
             animationChunks.push(fcTL, fdAT);
         }
-
-        animationChunks.unshift(first_fcTL, IDAT);
 
         const getBackgroundColor = (): Uint8Array => {
             const bKGD = this.findChunk("bKGD");
