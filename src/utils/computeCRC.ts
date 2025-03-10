@@ -37,7 +37,7 @@ export function computeCRC(buffer: ArrayBufferLike, start: number = 0, end: numb
     const bytes = new Uint8Array(buffer);
     
     let crc: number = -1;
-    for (let i = start; i < end; i++) crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ bytes[i]) & 0xff];
+    for (let i: number = start; i < end; i++) crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ bytes[i]) & 0xff];
     
     return (crc ^ -1) >>> 0;
 }

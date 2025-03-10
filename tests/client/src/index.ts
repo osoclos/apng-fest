@@ -1,19 +1,18 @@
 import { APNG } from "apng-fest";
 import "./style.css";
 
-const test = await APNG.from("test.png");
+const canvas = document.querySelector<HTMLCanvasElement>("#preview")!;
+const ctx = canvas.getContext("2d")!;
+
+const test = await APNG.fromURL("test-2.png");
 await test.createFrames();
 
-for (const frame of test.frames) {
-    const url = URL.createObjectURL(frame);
+const { width, height } = test;
+canvas.width = width;
+canvas.height = height;
 
-    const image = await new Promise<HTMLImageElement>((res, rej) => {
-        const image = new Image();
-        image.src = url;
-
-        image.addEventListener("load", () => res(image));
-        image.addEventListener("error", (err) => rej(`Unable to load image from "${url}". Reason: ${err.error}`));
-    });
-
-    document.body.appendChild(image);
-}
+let frameIdx: number = 0;
+setInterval(() => {
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(test.frames[frameIdx++ % test.frames.length].bitmap, 0, 0);
+}, 1000 / 5)
