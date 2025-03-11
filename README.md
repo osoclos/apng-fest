@@ -48,6 +48,9 @@ Another way of installing `apng-fest` would be through a CDN via a `<script>` ta
 <script src="https://cdn.jsdelivr.net/npm/apng-fest/dist/index.min.js"></script>
 
 <script>
+    // import apng-fest into your code...
+    const { APNG } = AF;
+
     // use apng-fest here...
     const apng = await APNG.create(100, 100);
 </script>

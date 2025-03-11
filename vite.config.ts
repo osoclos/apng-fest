@@ -14,7 +14,7 @@ const output = <OutputOptions[]>(<ModuleFormat[]>["es", "iife"]).map((format) =>
     
     entryFileNames: `index${format === "iife" ? "" : ".[format]"}.min.js`,
     
-    name: "APNG",
+    name: "AF",
     exports: "named",
 
     plugins: [terser()]
