@@ -509,24 +509,21 @@ export class APNG {
         const writeFrame = async (frame: Frame, i: number) => {
             let { data, width, height, top, left, delay } = frame;
 
-            let buffer: Uint8Array;
-            if (left < 0 || left + width > imageWidth || top < 0 || top + height > imageHeight) {
-                canvas.width = imageWidth;
-                canvas.height = imageHeight;
+            canvas.width = imageWidth;
+            canvas.height = imageHeight;
 
-                ctx.putImageData(data, left, top);
+            ctx.putImageData(data, left, top);
 
-                width = imageWidth;
-                height = imageHeight;
+            width = imageWidth;
+            height = imageHeight;
 
-                top = Math.max(top, 0);
-                left = Math.max(left, 0);
-                
-                const blob = await canvas.convertToBlob({ type: "image/png" });
-                buffer = new Uint8Array(await blob.arrayBuffer());
-            } else buffer = await frame.toBuffer();
+            top = 0;
+            left = 0;
+            
+            const blob = await canvas.convertToBlob({ type: "image/png" });
+            const buffer = await blob.arrayBuffer();
 
-            const frameManager = new DataManager(buffer.buffer);
+            const frameManager = new DataManager(buffer);
 
             const signature = frameManager.readUint64();
             if (signature !== SIGNATURE) throw new Error("Frame buffer is not a valid .PNG image.");

@@ -263,9 +263,11 @@ export class Frame {
         return new Uint8Array(buffer);
     }
 
-    async toBase64(): Promise<string> {
+    async toBase64(addURL: boolean = true): Promise<string> {
         const { buffer } = await this.toBuffer();
-        return Base64.from(buffer);
+        const base64 = Base64.from(buffer);
+
+        return addURL ? Base64.addURLData(base64, "image/png") : base64;
     }
 }
 
