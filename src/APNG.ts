@@ -375,12 +375,12 @@ export class APNG {
         return new APNG(await fetch(path).then((res) => res.arrayBuffer()), path.split("/").pop());
     }
 
-    async toBlob(): Promise<Blob> {
-        return new Blob([await this.toBuffer()], { type: "image/png" });
+    async toBlob(staggerDecoding?: boolean): Promise<Blob> {
+        return new Blob([await this.toBuffer(staggerDecoding)], { type: "image/png" });
     }
 
-    async toImg(): Promise<HTMLImageElement> {
-        const blob = await this.toBlob();
+    async toImg(staggerDecoding?: boolean): Promise<HTMLImageElement> {
+        const blob = await this.toBlob(staggerDecoding);
         const url = URL.createObjectURL(blob);
 
         const image = await new Promise<HTMLImageElement>((res, rej) => {
@@ -394,7 +394,7 @@ export class APNG {
         return image;
     }
 
-    async toBuffer(): Promise<Uint8Array> {
+    async toBuffer(staggerDecoding: boolean = false): Promise<Uint8Array> {
         const manager = new DataManager();
         manager.writeUint64(SIGNATURE);
 
@@ -506,9 +506,7 @@ export class APNG {
             this.writeChunk({ ...chunk, length, type: "fdAT", buffer, view }, manager, true);
         };
 
-        for (let i: number = 0; i < frames.length; i++) {
-            const frame = frames[i];
-
+        const writeFrame = async (frame: Frame, i: number) => {
             let { data, width, height, top, left, delay } = frame;
 
             let buffer: Uint8Array;
@@ -518,11 +516,11 @@ export class APNG {
 
                 ctx.putImageData(data, left, top);
 
-                top = Math.max(top, 0);
-                left = Math.max(left, 0);
-
                 width = imageWidth;
                 height = imageHeight;
+
+                top = Math.max(top, 0);
+                left = Math.max(left, 0);
                 
                 const blob = await canvas.convertToBlob({ type: "image/png" });
                 buffer = new Uint8Array(await blob.arrayBuffer());
@@ -543,14 +541,24 @@ export class APNG {
             (i ? write_fdAT : this.writeChunk)(IDAT, manager);
         }
 
+        if (staggerDecoding) await new Promise<void>(async (res) => {
+            let i: number = 0;
+            
+            await tick();
+            async function tick() {
+                await writeFrame(frames[i], i++);
+                i < frames.length ? requestAnimationFrame(tick) : res();
+            }
+        }); else for (let i: number = 0; i < frames.length; i++) await writeFrame(frames[i], i);
+
         const { IEND } = this;
         this.writeChunk(IEND, manager);
 
         return manager.buffer;
     }
 
-    async toBase64(addURL: boolean = true): Promise<string> {
-        const { buffer } = await this.toBuffer();
+    async toBase64(addURL: boolean = true, staggerDecoding?: boolean): Promise<string> {
+        const { buffer } = await this.toBuffer(staggerDecoding);
         const base64 = Base64.from(buffer);
 
         return addURL ? Base64.addURLData(base64, "image/png") : base64;

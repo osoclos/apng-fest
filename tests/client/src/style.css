@@ -1,0 +1,15 @@
+#settings {
+    display: flex;
+    
+    gap: 0.5rem;
+    align-items: center;
+}
+
+#demo {
+    display: block;
+
+    margin-block: 0.5rem;
+    
+    border-width: 0.25rem;
+    border-style: solid;
+}

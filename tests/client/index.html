@@ -4,10 +4,20 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         
-        <title>.APNG Fest Test Website</title>
+        <title>.APNG Fest Demo</title>
     </head>
     <body>
-        <canvas id="preview"></canvas>
+        <h1>.APNG Fest Demo</h1>
+
+        <div id="settings">
+            <button id="start">Start Demo</button>
+
+            <div>
+                <label for="stagger">Stagger Generation? (Better performance but takes a longer time)</label>
+                <input type="checkbox" id="stagger">
+            </div>
+        </div>
+
         <script type="module" src="src/index.ts"></script>
     </body>
 </html>

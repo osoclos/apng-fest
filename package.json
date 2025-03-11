@@ -1,8 +1,8 @@
 {
     "name": "apng-fest",
-    "description": "A simple yet powerful .APNG encoder and decoder in the browser.",
+    "description": "A simple yet powerful encoder and decoder for animated .PNGs",
     "type": "module",
-    "version": "0.0.0-dev-1a",
+    "version": "1.0.0",
 
     "author": "osoclos",
     "license": "MIT",
@@ -28,6 +28,10 @@
     "scripts": {
         "dev": "vite",
         "test": "vitest",
-        "build": "tsc --project tsconfig.lib.json && vite build --emptyOutDir"
+
+        "build": "tsc --project tsconfig.lib.json && bun run test && vite build --emptyOutDir",
+        "pack": "bun run build && npm pack",
+
+        "publish": "bun run build && bun publish"
     }
 }
