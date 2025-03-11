@@ -4,7 +4,34 @@ const BASE64_PADDING_CHARACTER: string = "=";
 
 const BASE64_URL_DATA_REGEX = /data:(?:\w+)\/(?:[\w\.-]+)(?:\+(?:[\w\.-]+))*;base64(url)?,/;
 
-export function from(base64: string) {
+export function from(buffer: ArrayBufferLike, useBase64URL: boolean = false): string {
+    const characters = BASE64_BASE_CHARACTERS + BASE64_SPECIAL_CHARACTERS[+useBase64URL];
+    const view = new DataView(buffer);
+
+    let base64: string = "";
+    let i: number = 0;
+
+    for (; i < Math.floor(view.byteLength / 3) * 3; i += 3) {
+        const bytes = (view.getUint16(i) << 8) | view.getUint8(i + 2);
+        for (let j: number = 3; j >= 0; j--) base64 += characters[(bytes >> j * 6) & 0b11_1111];
+    }
+
+    const remainder = view.byteLength - i;
+    if (!remainder) return base64;
+
+    let lastChunk: number = 0;
+    for (; i < view.byteLength; i++) {
+        const byte = view.getUint8(i);
+        lastChunk = lastChunk << 8 | byte;
+    }
+
+    lastChunk <<= 6 - (remainder * 8) % 6;
+    for (let j = remainder; j >= 0; j--) base64 += characters[(lastChunk >> j * 6) & 0b11_1111];
+
+    return base64 + BASE64_PADDING_CHARACTER.repeat(4 - Math.ceil(remainder * 8 / 6));
+}
+
+export function to(base64: string) {
     const data = format(removeURLData(base64)).replaceAll("=", "");
     const characters = BASE64_BASE_CHARACTERS + BASE64_SPECIAL_CHARACTERS[0];
 
@@ -30,33 +57,6 @@ export function from(base64: string) {
     }
 
     return view.buffer;
-}
-
-export function to(buffer: ArrayBufferLike, useBase64URL: boolean = false): string {
-    const characters = BASE64_BASE_CHARACTERS + BASE64_SPECIAL_CHARACTERS[+useBase64URL];
-    const view = new DataView(buffer);
-
-    let base64: string = "";
-    let i: number = 0;
-
-    for (; i < Math.floor(view.byteLength / 3) * 3; i += 3) {
-        const bytes = (view.getUint16(i) << 8) | view.getUint8(i + 2);
-        for (let j: number = 3; j >= 0; j--) base64 += characters[(bytes >> j * 6) & 0b11_1111];
-    }
-
-    const remainder = view.byteLength - i;
-    if (!remainder) return base64;
-
-    let lastChunk: number = 0;
-    for (; i < view.byteLength; i++) {
-        const byte = view.getUint8(i);
-        lastChunk = lastChunk << 8 | byte;
-    }
-
-    lastChunk <<= 6 - (remainder * 8) % 6;
-    for (let j = remainder; j >= 0; j--) base64 += characters[(lastChunk >> j * 6) & 0b11_1111];
-
-    return base64 + BASE64_PADDING_CHARACTER.repeat(4 - Math.ceil(remainder * 8 / 6));
 }
 
 export function format(base64: string, useBase64URL: boolean = false): string {
