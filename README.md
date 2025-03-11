@@ -103,7 +103,7 @@ Here is a simple HTML + JavaScript example using the `apng-fest` library:
 
     // create canvas context
     const canvas = document.getElementById("example");
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
     // create our animated .PNG here
     const apng = await APNG.create(WIDTH, HEIGHT);
