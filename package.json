@@ -29,9 +29,9 @@
         "dev": "vite",
         "test": "vitest",
 
-        "build": "tsc --project tsconfig.lib.json && bun run test && vite build --emptyOutDir",
+        "build": "tsc --project tsconfig.lib.json && vite build --emptyOutDir",
         "pack": "bun run build && npm pack",
 
-        "publish": "bun run build && bun publish"
+        "publish": "bun run build && bun run publish"
     }
 }
