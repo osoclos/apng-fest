@@ -497,6 +497,7 @@ export class APNG {
             if (type !== "IDAT") throw new Error("Chunk is not an IDAT chunk.");
 
             const length = chunkLength + 4;
+
             const buffer = new Uint8Array(length);
             buffer.set(chunkBuffer, 4);
 
@@ -509,21 +510,24 @@ export class APNG {
         const writeFrame = async (frame: Frame, i: number) => {
             let { data, width, height, top, left, delay } = frame;
 
-            canvas.width = imageWidth;
-            canvas.height = imageHeight;
+            let buffer: Uint8Array;
+            if (left < 0 || left + width > imageWidth || top < 0 || top + height > imageHeight) {
+                canvas.width = imageWidth;
+                canvas.height = imageHeight;
 
-            ctx.putImageData(data, left, top);
+                ctx.putImageData(data, left, top);
 
-            width = imageWidth;
-            height = imageHeight;
+                width = imageWidth;
+                height = imageHeight;
 
-            top = 0;
-            left = 0;
-            
-            const blob = await canvas.convertToBlob({ type: "image/png" });
-            const buffer = await blob.arrayBuffer();
+                top = 0;
+                left = 0;
+                
+                const blob = await canvas.convertToBlob({ type: "image/png" });
+                buffer = new Uint8Array(await blob.arrayBuffer());
+            } else buffer = await frame.toBuffer();
 
-            const frameManager = new DataManager(buffer);
+            const frameManager = new DataManager(buffer.buffer);
 
             const signature = frameManager.readUint64();
             if (signature !== SIGNATURE) throw new Error("Frame buffer is not a valid .PNG image.");
@@ -531,6 +535,7 @@ export class APNG {
             const chunks = [];
             do chunks.push(this.readChunk(frameManager)); while (chunks[chunks.length - 1].type !== "IEND" || frameManager.pointer < frameManager.length);
 
+            // TODO: THERE ARE MULTIPLE IDAT CHUNKS!!!! must combine them into single idat chunk before loading.
             const IDAT = chunks.find(({ type }) => type === "IDAT");
             if (!IDAT) throw new Error("Unable to find IDAT chunk in frame file.");
             
