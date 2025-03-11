@@ -36,7 +36,7 @@ const ALLOWED_BIT_DEPTHS: Record<ColorType, number[]> = {
     ],
 };
 
-const { canvas } = InternalCanvas;
+const { canvas, ctx } = InternalCanvas;
 
 export class APNG {
     frames: Frame[];
@@ -139,7 +139,7 @@ export class APNG {
         canvas.width = width;
         canvas.height = height;
 
-        const blob = await canvas.convertToBlob();
+        const blob = await canvas.convertToBlob({ type: "image/png" });
         const buffer = await blob.arrayBuffer();
 
         return new APNG(buffer, name);
@@ -509,11 +509,24 @@ export class APNG {
         for (let i: number = 0; i < frames.length; i++) {
             const frame = frames[i];
 
-            const { width, height, top, left, delay } = frame;
+            let { data, width, height, top, left, delay } = frame;
 
-            // TODO: clip image data if it exceeds image width and height
+            let buffer: Uint8Array;
+            if (left < 0 || left + width > imageWidth || top < 0 || top + height > imageHeight) {
+                canvas.width = imageWidth;
+                canvas.height = imageHeight;
 
-            const buffer = await frame.toBuffer();
+                ctx.putImageData(data, left, top);
+
+                top = Math.max(top, 0);
+                left = Math.max(left, 0);
+
+                width = imageWidth;
+                height = imageHeight;
+                
+                const blob = await canvas.convertToBlob({ type: "image/png" });
+                buffer = new Uint8Array(await blob.arrayBuffer());
+            } else buffer = await frame.toBuffer();
 
             const frameManager = new DataManager(buffer.buffer);
 

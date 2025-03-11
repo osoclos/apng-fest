@@ -237,7 +237,7 @@ export class Frame {
 
         ctx.putImageData(data, 0, 0);
         
-        const blob = await canvas.convertToBlob();
+        const blob = await canvas.convertToBlob({ type: "image/png" });
         return blob;
     }
 
