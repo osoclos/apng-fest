@@ -2,7 +2,7 @@
     "name": "apng-fest",
     "description": "A simple yet powerful encoder and decoder for animated .PNGs",
     "type": "module",
-    "version": "1.0.4",
+    "version": "1.1.0",
 
     "author": "osoclos",
     "license": "MIT",

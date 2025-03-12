@@ -18,7 +18,7 @@ let hasStarted: boolean = false;
 const startButton = document.querySelector<HTMLButtonElement>("#start")!;
 startButton.addEventListener("click", startDemo);
 
-const staggerCheckbox = document.querySelector<HTMLInputElement>("#stagger")!;
+const encoderRenderCheckbox = document.querySelector<HTMLInputElement>("#encode-render")!;
 
 function startDemo() {
     if (hasStarted) return;
@@ -45,6 +45,9 @@ function startDemo() {
     
     let hue: number = 0;
     let angle: number = 0;
+
+    apng.reset();
+    if (encoderRenderCheckbox.checked) apng.writeHeader();
     
     const intervalId = setInterval(async () => {
         ctx.clearRect(0, 0, WIDTH, HEIGHT);
@@ -67,7 +70,7 @@ function startDemo() {
         ctx.fill();
     
         const frame = Frame.fromCtx(ctx, { delay: 1 / FPS });
-        apng.frames.push(frame);
+        encoderRenderCheckbox.checked ? apng.writeFrame(frame) : apng.frames.push(frame);
     
         x += speedX;
         if (x > WIDTH - RADIUS) speedX *= -1;
@@ -80,8 +83,23 @@ function startDemo() {
 
         const start = performance.now();
         text.innerText = "Generating...";
-    
-        const image = await apng.toImg(staggerCheckbox.checked);
+
+        let image: HTMLImageElement;
+        if (encoderRenderCheckbox.checked) {
+            const buffer = apng.writeFooter();
+
+            const blob = new Blob([buffer], { type: "image/png" });
+            const url = URL.createObjectURL(blob);
+
+            image = await new Promise<HTMLImageElement>((res, rej) => {
+                const image = new Image();
+                image.src = url;
+
+                image.addEventListener("load", () => res(image));
+                image.addEventListener("error", () => rej("1: Unexpectedly encountered an error while creating image."));
+            });
+        } else image = await apng.toImg();
+
         document.body.appendChild(image);
 
         const end = performance.now();

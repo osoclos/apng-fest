@@ -1,4 +1,4 @@
-import { ColorType, type Chunk, type ChunkType } from "./types";
+import { CHUNK_LENGTHS, CHUNK_METADATA_LENGTH, ColorType, type Chunk, type ChunkType } from "./types";
 import { Base64, computeCRC, DataManager, floatToFrac, InternalCanvas } from "./utils";
 
 import { Frame, FrameBlendOperation, FrameDisposeOperation, type FrameOptions } from "./Frame";
@@ -49,6 +49,15 @@ export class APNG {
 
     private chunks: Chunk[];
 
+    private writeBuffer: Uint8Array;
+    private writeNumOfFrames: number;
+
+    private hasWrittenIHDR: boolean;
+    private hasWrittenIEND: boolean;
+
+    private writeSequenceNumber: number;
+    private writeFrameIdx: number;
+
     constructor(private buffer: ArrayBufferLike, public name: string = "image.png") {
         const manager = new DataManager(buffer);
 
@@ -77,6 +86,15 @@ export class APNG {
         
         this.frames = [];
         this.#hasCreatedFrames = false;
+
+        this.writeBuffer = new Uint8Array();
+        this.writeNumOfFrames = 0;
+
+        this.hasWrittenIHDR = false;
+        this.hasWrittenIEND = false;
+
+        this.writeSequenceNumber = 0;
+        this.writeFrameIdx = 0;
     }
 
     get hasCreatedFrames(): boolean {
@@ -308,94 +326,34 @@ export class APNG {
         this.frames.forEach((frame) => frame.update());
     }
 
-    private findChunk(chunkType: ChunkType): Chunk | null {
-        return this.chunks.find(({ type }) => type === chunkType) ?? null;
+    reset(clearFrames: boolean = true) {
+        if (clearFrames) this.frames = [];
+
+        this.writeBuffer = new Uint8Array();
+        this.writeNumOfFrames = 0;
+
+        this.hasWrittenIHDR = false;
+        this.hasWrittenIEND = false;
+
+        this.writeSequenceNumber = 0;
+        this.writeFrameIdx = 0;
     }
 
-    private filterChunks(...types: ChunkType[]): Chunk[] {
-        return this.chunks.filter(({ type }) => types.includes(type));
-    }
+    writeHeader() {
+        if (this.hasWrittenIHDR) throw new Error("Header has already been written to buffer.");
+        
+        this.reset(false);
 
-    private readChunk(manager: DataManager): Chunk {
-        const length = manager.readUint32();
-
-        const typeBytes = manager.slice(4);
-        const type = <ChunkType>String.fromCharCode(...typeBytes);
-
-        const buffer = manager.slice(length);
-        const view = new DataView(buffer.buffer);
-
-        const crcBuffer = new Uint8Array([...typeBytes, ...buffer]).buffer;
-        const crc = computeCRC(crcBuffer);
-
-        const fileCRC = manager.readUint32();
-        if (crc !== fileCRC) throw new Error("CRC Checksum does not match computed checksum. File may be corrupted or tampered with.");
-
-        return { type, length, buffer, view, crc };
-    }
-
-    private writeChunk(chunk: Chunk, manager: DataManager, recalculateCRC: boolean = false) {
-        const { type, length, buffer, crc } = chunk;
-
-        manager.writeUint32(length);
-        manager.copy(type.split("").map((char) => char.charCodeAt(0)));
-
-        manager.copy(buffer);
-        manager.writeUint32(recalculateCRC ? computeCRC(manager.buffer.slice(manager.pointer - length - 4).buffer) : crc);
-    }
-
-    static async fromBlob(blob: Blob) {
-        return new APNG(await blob.arrayBuffer(), blob instanceof File ? blob.name : undefined);
-    }
-
-    static fromBuffer(buffer: ArrayBufferView) {
-        return new APNG(buffer.buffer);
-    }
-
-    static fromBase64(base64: string) {
-        return new APNG(Base64.to(base64));
-    }
-
-    static async fromURL(path: string) {
-        return new APNG(await fetch(path).then((res) => res.arrayBuffer()), path.split("/").pop());
-    }
-
-    async toBlob(staggerDecoding?: boolean): Promise<Blob> {
-        return new Blob([await this.toBuffer(staggerDecoding)], { type: "image/png" });
-    }
-
-    async toImg(staggerDecoding?: boolean): Promise<HTMLImageElement> {
-        const blob = await this.toBlob(staggerDecoding);
-        const url = URL.createObjectURL(blob);
-
-        const image = await new Promise<HTMLImageElement>((res, rej) => {
-            const image = new Image();
-            image.src = url;
-
-            image.addEventListener("load", () => res(image));
-            image.addEventListener("error", () => rej("Unexpectedly encountered an error while creating image."));
-        });
-
-        return image;
-    }
-
-    async toBuffer(staggerDecoding: boolean = false): Promise<Uint8Array> {
-        const manager = new DataManager();
+        const manager = new DataManager(this.writeBuffer.buffer);
         manager.writeUint64(SIGNATURE);
 
         const {
-            frames,
-            
             width: imageWidth,
-            height: imageHeight,
-            
-            numOfFrames
+            height: imageHeight
         } = this;
 
-        const numOfLoops = this.#numOfLoops;
-
         const writeIHDR = (manager: DataManager, width: number, height: number) => {
-            const length: number = 13;
+            const length: number = CHUNK_LENGTHS.IHDR;
             const type: ChunkType = "IHDR";
 
             const buffer = new Uint8Array(length);
@@ -416,34 +374,32 @@ export class APNG {
             this.writeChunk({ length, type, buffer, view, crc }, manager, true);
         };
 
-        const write_acTL = (manager: DataManager, numOfFrames: number, numOfLoops: number) => {
-            const length: number = 8;
-            const type: ChunkType = "acTL";
-
-            const buffer = new Uint8Array(length);
-            const view = new DataView(buffer.buffer);
-
-            view.setUint32(0, numOfFrames);
-            view.setUint32(4, numOfLoops);
-
-            const crc: number = 0; // will be recalculated later.
-
-            this.writeChunk({ length, type, buffer, view, crc }, manager, true);
-        };
-
         writeIHDR(manager, imageWidth, imageHeight);
-        write_acTL(manager, numOfFrames, numOfLoops);
 
-        let sequenceNumber: number = 0;
+        this.writeBuffer = manager.buffer;
+        this.writeNumOfFrames = 0;
+
+        this.hasWrittenIHDR = true;
+
+        return this.writeBuffer;
+    }
+
+    async writeFrame(frame: Frame = this.frames[this.writeFrameIdx]) {
+        const manager = new DataManager(this.writeBuffer.buffer, this.writeBuffer.byteLength);
+
+        const {
+            width: imageWidth,
+            height: imageHeight
+        } = this;
 
         const write_fcTL = (manager: DataManager, width: number, height: number, top: number, left: number, delay: number) => {
-            const length: number = 26;
+            const length: number = CHUNK_LENGTHS.fcTL;
             const type: ChunkType = "fcTL";
 
             const buffer = new Uint8Array(length);
             const view = new DataView(buffer.buffer);
 
-            view.setUint32(0, sequenceNumber++);
+            view.setUint32(0, this.writeSequenceNumber++);
 
             view.setUint32(4, width);
             view.setUint32(8, height);
@@ -473,7 +429,7 @@ export class APNG {
             } = chunk;
 
             if (type === "fdAT") {
-                chunkView.setUint32(0, sequenceNumber++);
+                chunkView.setUint32(0, this.writeSequenceNumber++);
                 this.writeChunk(chunk, manager);
 
                 return;
@@ -487,12 +443,12 @@ export class APNG {
             buffer.set(chunkBuffer, 4);
 
             const view = new DataView(buffer.buffer);
-            view.setUint32(0, sequenceNumber++);
+            view.setUint32(0, this.writeSequenceNumber++);
 
             this.writeChunk({ ...chunk, length, type: "fdAT", buffer, view }, manager, true);
         };
 
-        const writeFrame = async (frame: Frame, i: number) => {
+        const writeFrame = async (frame: Frame, writeIDAT: boolean) => {
             let { data, width, height, top, left, delay } = frame;
 
             let buffer: Uint8Array;
@@ -524,27 +480,148 @@ export class APNG {
             if (!IDATs.length) throw new Error("Unable to find IDAT chunks in frame file.");
             
             write_fcTL(manager, width, height, top, left, delay);
-            for (let j: number = 0; j < IDATs.length; j++) (i ? write_fdAT : this.writeChunk)(IDATs[j], manager);
+            for (let j: number = 0; j < IDATs.length; j++) (writeIDAT ? this.writeChunk : write_fdAT)(IDATs[j], manager);
         }
 
-        if (staggerDecoding) await new Promise<void>((res) => {
-            let i: number = 0;
-            async function encode() {
-                await writeFrame(frames[i], i++);
-                i < frames.length ? setTimeout(encode) : res();
-            }
+        await writeFrame(frame, !this.writeNumOfFrames);
 
-            encode();
-        }); else for (let i: number = 0; i < frames.length; i++) await writeFrame(frames[i], i);
+        this.writeBuffer = manager.buffer;
+        this.writeNumOfFrames++;
 
-        const { IEND } = this;
-        this.writeChunk(IEND, manager);
+        frame === this.frames[this.writeFrameIdx] && this.writeFrameIdx++;
 
-        return manager.buffer;
+        return this.writeBuffer;
     }
 
-    async toBase64(addURL: boolean = true, staggerDecoding?: boolean): Promise<string> {
-        const { buffer } = await this.toBuffer(staggerDecoding);
+    writeFooter() {
+        if (this.hasWrittenIEND) throw new Error("Footer has already been written to buffer.");
+
+        const { writeNumOfFrames } = this;
+        const numOfLoops = this.#numOfLoops;
+
+        const { IEND } = this;
+        const write_acTL = (manager: DataManager, numOfFrames: number, numOfLoops: number) => {
+            const length: number = CHUNK_LENGTHS.acTL;
+            const type: ChunkType = "acTL";
+
+            const buffer = new Uint8Array(length);
+            const view = new DataView(buffer.buffer);
+
+            view.setUint32(0, numOfFrames);
+            view.setUint32(4, numOfLoops);
+
+            const crc: number = 0; // will be recalculated later.
+
+            this.writeChunk({ length, type, buffer, view, crc }, manager, true);
+        };
+
+        const buffer = new Uint8Array(this.writeBuffer.length + CHUNK_LENGTHS.acTL + CHUNK_METADATA_LENGTH);
+        const manager = new DataManager(buffer.buffer);
+
+        manager.copy(this.writeBuffer.buffer, 0, 8 + CHUNK_LENGTHS.IHDR + CHUNK_METADATA_LENGTH);
+        write_acTL(manager, writeNumOfFrames, numOfLoops);
+        manager.copy(this.writeBuffer.buffer, 8 + CHUNK_LENGTHS.IHDR + CHUNK_METADATA_LENGTH);
+        
+        this.writeChunk(IEND, manager);
+
+        this.writeBuffer = manager.buffer;
+        this.hasWrittenIEND = true;
+
+        return this.writeBuffer;
+    }
+
+    private findChunk(chunkType: ChunkType): Chunk | null {
+        return this.chunks.find(({ type }) => type === chunkType) ?? null;
+    }
+
+    private filterChunks(...types: ChunkType[]): Chunk[] {
+        return this.chunks.filter(({ type }) => types.includes(type));
+    }
+
+    private readChunk(manager: DataManager): Chunk {
+        const length = manager.readUint32();
+
+        const typeBytes = manager.slice(4);
+        const type = <ChunkType>String.fromCharCode(...typeBytes);
+
+        const buffer = manager.slice(length);
+        const view = new DataView(buffer.buffer);
+
+        const crcBuffer = new Uint8Array([...typeBytes, ...buffer]).buffer;
+        const crc = computeCRC(crcBuffer);
+
+        const fileCRC = manager.readUint32();
+        if (crc !== fileCRC) throw new Error("CRC Checksum does not match computed checksum. File may be corrupted or tampered with.");
+
+        return { type, length, buffer, view, crc };
+    }
+
+    private writeChunk(chunk: Chunk, manager: DataManager, recalculateCRC: boolean = false) {
+        const { type, length, buffer, crc } = chunk;
+
+        const typeBytes = type.split("").map((char) => char.charCodeAt(0))
+
+        manager.writeUint32(length);
+        manager.copy(typeBytes);
+
+        manager.copy(buffer);
+
+        const crcBuffer = new Uint8Array(length + 4);
+        crcBuffer.set(typeBytes);
+        crcBuffer.set(buffer, 4);
+
+        manager.writeUint32(recalculateCRC ? computeCRC(crcBuffer.buffer) : crc);
+    }
+
+    static async fromBlob(blob: Blob) {
+        return new APNG(await blob.arrayBuffer(), blob instanceof File ? blob.name : undefined);
+    }
+
+    static fromBuffer(buffer: ArrayBufferView) {
+        return new APNG(buffer.buffer);
+    }
+
+    static fromBase64(base64: string) {
+        return new APNG(Base64.to(base64));
+    }
+
+    static async fromURL(path: string) {
+        return new APNG(await fetch(path).then((res) => res.arrayBuffer()), path.split("/").pop());
+    }
+
+    async toBlob(): Promise<Blob> {
+        return new Blob([await this.toBuffer()], { type: "image/png" });
+    }
+
+    async toImg(): Promise<HTMLImageElement> {
+        const blob = await this.toBlob();
+        const url = URL.createObjectURL(blob);
+
+        const image = await new Promise<HTMLImageElement>((res, rej) => {
+            const image = new Image();
+            image.src = url;
+
+            image.addEventListener("load", () => res(image));
+            image.addEventListener("error", () => rej("2: Unexpectedly encountered an error while creating image."));
+        });
+
+        return image;
+    }
+
+    async toBuffer(): Promise<Uint8Array> {
+        const { frames } = this;
+
+        this.reset(false);
+        
+        this.writeHeader();
+        for (let i: number = 0; i < frames.length; i++) await this.writeFrame();
+        this.writeFooter();
+
+        return this.writeBuffer;
+    }
+
+    async toBase64(addURL: boolean = true): Promise<string> {
+        const { buffer } = await this.toBuffer();
         const base64 = Base64.from(buffer);
 
         return addURL ? Base64.addURLData(base64, "image/png") : base64;

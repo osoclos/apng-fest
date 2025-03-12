@@ -8,7 +8,7 @@ export class DataManager {
     }
 
     get length(): number {
-        return this.buffer.length;
+        return this.buffer.byteLength;
     }
 
     readUint8(): number {
@@ -51,7 +51,7 @@ export class DataManager {
         return this.buffer.slice(this.advance(length), this.pointer);
     }
 
-    copy(arr: ArrayBufferLike | Iterable<number>, offset: number = 0, length: number = Symbol.iterator in arr ? [...arr].length : arr.byteLength) {
+    copy(arr: ArrayBufferLike | Iterable<number>, offset: number = 0, length: number = (Symbol.iterator in arr ? [...arr].length : arr.byteLength) - offset) {
         if (this.pointer + length > this.length) this.resize(this.pointer + length);
         this.buffer.set(Symbol.iterator in arr ? [...arr].slice(offset, offset + length) : new Uint8Array(arr).slice(offset, offset + length), this.advance(length));
     }
