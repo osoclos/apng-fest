@@ -58,8 +58,8 @@ export class APNG {
         this.chunks = [];
         do this.chunks.push(this.readChunk(manager)); while (this.chunks[this.chunks.length - 1].type !== "IEND" || manager.pointer < manager.length);
 
-        const { IHDR, IDAT, IEND } = this;
-        if (!IHDR || !IDAT || !IEND) throw new Error("Unable to find mandatory chunks for .PNG file. File may be corrupted or tampered with.");
+        const { IHDR, IDATs, IEND } = this;
+        if (!IHDR || !IDATs.length || !IEND) throw new Error("Unable to find mandatory chunks for .PNG file. File may be corrupted or tampered with.");
         
         this.width = IHDR.view.getUint32(0) & (-1 >>> 1);
         this.height = IHDR.view.getUint32(4) & (-1 >>> 1);
@@ -90,11 +90,11 @@ export class APNG {
         return IHDR;
     }
 
-    private get IDAT(): Chunk {
-        const IDAT = this.findChunk("IDAT");
-        if (!IDAT) throw new Error("Unable to find IDAT chunk in file.");
+    private get IDATs(): Chunk[] {
+        const IDATs = this.filterChunks("IDAT");
+        if (!IDATs.length) throw new Error("Unable to find IDAT chunks in file.");
 
-        return IDAT;
+        return IDATs;
     }
 
     private get IEND(): Chunk {
@@ -175,29 +175,21 @@ export class APNG {
             return;
         }
 
-        const { IHDR, IDAT, IEND } = this;
+        const { IHDR, IEND } = this;
         const { ancillaryChunks } = this;
 
-        const [fcTLs, fdATs] = (<ChunkType[]>["fcTL", "fdAT"]).map((type) => this.filterChunks(type));
-        fdATs.unshift(IDAT);
+        const animationChunks = this.filterChunks("IDAT", "fcTL", "fdAT");
 
-        const animationChunks: Chunk[] = [];
+        // if the first fcTL chunk is after the IDAT chunk, remove IDAT from the list.
+        const isIDAT_InAnimation = animationChunks.findIndex(({ type }) => type === "fcTL") < animationChunks.findIndex(({ type }) => type === "IDAT");
+        
+        const IDATs: Chunk[] = [];
+        for (let i: number = 0; i < animationChunks.length; i++) animationChunks[i].type === "IDAT" && IDATs.push(...animationChunks.splice(i--, 1));
+
+        animationChunks.sort(({ view: a }, { view: b }) => a.getUint32(0) - b.getUint32(0));
+        if (isIDAT_InAnimation) animationChunks.splice(animationChunks.findIndex(({ type }) => type === "fcTL") + 1, 0, ...IDATs);
+
         const numOfFrames = acTL.view.getUint32(0);
-
-        for (let i: number = 0; i < numOfFrames * 2 - 1; i++) {
-            const fcTL_Idx = fcTLs.findIndex((chunk) => getSequenceNumber(chunk) === i);
-            if (fcTL_Idx < 0) throw new Error("Unable to find following fcTL chunk. File may be corrupted or tampered with.");
-
-            // if IDAT chunk is placed before first fcTL chunk, we can assume that IDAT is not used in animation.
-            const fdAT_Idx = fdATs.findIndex((chunk) => (chunk.type === "IDAT" && this.chunks.indexOf(IDAT) > this.chunks.findIndex(({ type }) => type === "fcTL")) || getSequenceNumber(chunk) === i + 1);
-            if (fdAT_Idx < 0) throw new Error("Unable to find following fdAT chunk. File may be corrupted or tampered with.");
-
-            const [fcTL] = fcTLs.splice(fcTL_Idx, 1);
-            const [fdAT] = fdATs.splice(fdAT_Idx, 1);
-
-            if (fdAT.type !== "IDAT") i++;
-            animationChunks.push(fcTL, fdAT);
-        }
 
         const getBackgroundColor = (): Uint8Array => {
             const bKGD = this.findChunk("bKGD");
@@ -267,10 +259,14 @@ export class APNG {
             this.writeChunk({ ...chunk, type: "IDAT", buffer, view }, manager, true);
         };
 
-        for (let i: number = 0; i < animationChunks.length; i += 2) {
+        while (this.frames.length < numOfFrames) {
             const manager = new DataManager();
 
-            const [fcTL, fdAT] = animationChunks.slice(i, i + 2);
+            const fcTL = animationChunks.shift();
+            if (!fcTL || fcTL.type !== "fcTL") throw new Error("Error creating frames: Frame data is misaligned.");
+
+            const next_fcTL_Idx = animationChunks.findIndex(({ type }) => type === "fcTL");
+            const fdATs = animationChunks.splice(0, next_fcTL_Idx < 0 ? animationChunks.length : next_fcTL_Idx);
 
             const options = getFrameOptions(fcTL);
             const { width, height } = options;
@@ -279,11 +275,11 @@ export class APNG {
             writeIHDR(IHDR, manager, width, height);
 
             for (let i: number = 0; i < ancillaryChunks.length; i++) this.writeChunk(ancillaryChunks[i], manager);
-            write_fdAT(fdAT, manager);
+            for (let i: number = 0; i < fdATs.length; i++) write_fdAT(fdATs[i], manager);
 
             this.writeChunk(IEND, manager);
 
-            const frame = await Frame.fromBuffer(manager.buffer, options, { imageWidth, imageHeight, backgroundColor, clearBitmapHistory: !i });
+            const frame = await Frame.fromBuffer(manager.buffer, options, { imageWidth, imageHeight, backgroundColor, clearBitmapHistory: !this.frames.length });
             this.frames.push(frame);
         }
 
@@ -306,17 +302,6 @@ export class APNG {
 
             return { width, height, left, top, delay, disposeOperation, blendOperation };
         }
-
-        function getSequenceNumber(chunk: Chunk): number | null {
-            const { type, view } = chunk;
-            switch (type) {
-                case "fcTL":
-                case "fdAT": return view.getUint32(0);
-                case "IDAT": return 0;
-
-                default: return null;
-            }
-        }
     }
 
     update() {
@@ -327,8 +312,8 @@ export class APNG {
         return this.chunks.find(({ type }) => type === chunkType) ?? null;
     }
 
-    private filterChunks(chunkType: ChunkType): Chunk[] {
-        return this.chunks.filter(({ type }) => type === chunkType);
+    private filterChunks(...types: ChunkType[]): Chunk[] {
+        return this.chunks.filter(({ type }) => types.includes(type));
     }
 
     private readChunk(manager: DataManager): Chunk {
@@ -535,22 +520,24 @@ export class APNG {
             const chunks = [];
             do chunks.push(this.readChunk(frameManager)); while (chunks[chunks.length - 1].type !== "IEND" || frameManager.pointer < frameManager.length);
 
-            // TODO: THERE ARE MULTIPLE IDAT CHUNKS!!!! must combine them into single idat chunk before loading.
-            const IDAT = chunks.find(({ type }) => type === "IDAT");
-            if (!IDAT) throw new Error("Unable to find IDAT chunk in frame file.");
+            const IDATs = chunks.filter(({ type }) => type === "IDAT");
+            if (!IDATs.length) throw new Error("Unable to find IDAT chunks in frame file.");
             
             write_fcTL(manager, width, height, top, left, delay);
-            (i ? write_fdAT : this.writeChunk)(IDAT, manager);
+            for (let j: number = 0; j < IDATs.length; j++) (i ? write_fdAT : this.writeChunk)(IDATs[j], manager);
         }
 
-        if (staggerDecoding) await new Promise<void>(async (res) => {
+        if (staggerDecoding) await new Promise<void>((res) => {
             let i: number = 0;
-            
-            await tick();
-            async function tick() {
-                await writeFrame(frames[i], i++);
-                i < frames.length ? requestAnimationFrame(tick) : res();
-            }
+            const intervalId = setInterval(async () => {
+                if (i < frames.length) {
+                    await writeFrame(frames[i], i++);
+                    return;
+                }
+
+                clearInterval(intervalId);
+                res();
+            });
         }); else for (let i: number = 0; i < frames.length; i++) await writeFrame(frames[i], i);
 
         const { IEND } = this;
