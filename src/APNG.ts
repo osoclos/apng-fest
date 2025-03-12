@@ -529,15 +529,12 @@ export class APNG {
 
         if (staggerDecoding) await new Promise<void>((res) => {
             let i: number = 0;
-            const intervalId = setInterval(async () => {
-                if (i < frames.length) {
-                    await writeFrame(frames[i], i++);
-                    return;
-                }
+            async function encode() {
+                await writeFrame(frames[i], i++);
+                i < frames.length ? setTimeout(encode) : res();
+            }
 
-                clearInterval(intervalId);
-                res();
-            });
+            encode();
         }); else for (let i: number = 0; i < frames.length; i++) await writeFrame(frames[i], i);
 
         const { IEND } = this;
